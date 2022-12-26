@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Delta X Station</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link type="text/css" rel="stylesheet" href="main.css">
+</head>
+
+<body>
+    <div id="Scene3d"> </div>
+
+    <!-- Import maps polyfill -->
+    <!-- Remove this when import maps will be widely supported -->
+    <!-- <script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script> -->
+
+    <script type="importmap">
+			{
+				"imports": {
+					"three": "https://unpkg.com/three@0.147.0/build/three.module.js",
+                    "three/addons/": "https://unpkg.com/three@0.147.0/examples/jsm/"
+				}
+			}
+		</script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+        let camera, scene, renderer, stats, controlCamera;
+
+        // deltax station component
+        let d400_frame, d600_frame, d800_frame;
+        let deltaxs_d400, deltaxs_d600, deltaxs_d800;
+        let xcon_d200_l1200, xcon_d300_l1200, xcon_d400_l1200;
+        let xcon_d120_l1200, xcon_d200_l1200_1;
+        let encoder_d200, encoder_d300, encoder_d400;
+        let encoder_controler, conveyor_controler, camera_module, ethernet_module, mini_pc, monitor_pc;
+        let estop_button, hmi_display, power_24v;
+
+        const clock = new THREE.Clock();
+        const mouse = new THREE.Vector2();
+        const raycaster = new THREE.Raycaster();
+
+        const blurObjectOpacity = 0.1;
+        const NonBlurObjectOpacity = 0.99;
+        let component_selected;
+
+        const station = {
+            d400_frame, d600_frame, d800_frame,
+            deltaxs_d400, deltaxs_d600, deltaxs_d800,
+            xcon_d200_l1200, xcon_d300_l1200, xcon_d400_l1200,
+            xcon_d120_l1200, xcon_d200_l1200_1,
+            encoder_d200, encoder_d300, encoder_d400,
+            encoder_controler, conveyor_controler, camera_module, ethernet_module, mini_pc, monitor_pc,
+            estop_button, hmi_display, power_24v,
+        };
+
+        const params = {
+            frame: true,
+            deltaXSModel: "Delta X S V5 D800",
+            firstConveyor: "XConveyor D200 L1200",
+            secondConveyor: "XConveyor D120 L1200",
+            encoderModule: true,
+            cameraModule: true,
+            ethernetHub: true,
+            embeddedComputer: true,
+        };
+
+        initScene();
+        loadFbx();
+        initRenderer();
+        addEventListener();
+        initGui();
+        animate();
+
+        function initGui() {
+            const gui = new GUI();
+            gui.add(params, 'frame').name('Frame').onChange(onGuiFrameChanged);
+            gui.add(params, 'deltaXSModel', ['Delta X S V5 D800', 'Delta X S V5 D600', 'Delta X S V5 D400', 'None']).name('Delta X Model').onChange(onGuiDeltaXModelChanged);
+            gui.add(params, 'firstConveyor', ['XConveyor D200 L1200', 'XConveyor D300 L1200', 'XConveyor D400 L1200', 'None']).name('First Conveyor Model').onChange(onGuiFirstConveyorChanged);
+            gui.add(params, 'secondConveyor', ['XConveyor D120 L1200', 'XConveyor D200 L1200', 'None']).name('Second Conveyor Model').onChange(onGuiSecondConveyorChanged);
+            gui.add(params, 'encoderModule').name('Encoder').onChange(onGuiEncoderChanged);
+            gui.add(params, 'cameraModule').name('Camera').onChange(onGuiCameraChanged);
+            gui.add(params, 'ethernetHub').name('Ethernet Switch').onChange(onGuiEthernetHubChanged);
+            gui.add(params, 'embeddedComputer').name('Embedded Computer').onChange(onGuiComputeChanged);
+        }
+
+        function onGuiFrameChanged(value) {
+            station.d800_frame.visible = false;
+            station.d600_frame.visible = false;
+            station.d400_frame.visible = false;
+
+            if (params.frame) {
+                if (params.deltaXSModel == 'None' || params.deltaXSModel == 'Delta X S V5 D800') {
+                    station.d800_frame.visible = true;
+                }
+                else if (params.deltaXSModel == 'Delta X S V5 D600') {
+                    station.d600_frame.visible = true;
+                }
+                else if (params.deltaXSModel == 'Delta X S V5 D400') {
+                    station.d400_frame.visible = true;
+                }
+            }
+        }
+
+        function onGuiDeltaXModelChanged(value) {
+            station.deltaxs_d400.visible = false;
+            station.deltaxs_d600.visible = false;
+            station.deltaxs_d800.visible = false;
+            if (params.deltaXSModel == 'None') {
+            }
+            else if (params.deltaXSModel == 'Delta X S V5 D800') {
+                station.deltaxs_d800.visible = true;
+            }
+            else if (params.deltaXSModel == 'Delta X S V5 D600') {
+                station.deltaxs_d600.visible = true;
+            }
+            else if (params.deltaXSModel == 'Delta X S V5 D400') {
+                station.deltaxs_d400.visible = true;
+            }
+            onGuiFrameChanged(true);
+        }
+
+        function onGuiFirstConveyorChanged(value) {
+            station.xcon_d200_l1200.visible = false;
+            station.xcon_d300_l1200.visible = false;
+            station.xcon_d400_l1200.visible = false;
+            //scene.getObjectByName('XConveyor_Controler-1').visible = false;
+
+            if (params.firstConveyor == 'None') {
+            }
+            else if (params.firstConveyor == 'XConveyor D200 L1200') {
+                station.xcon_d200_l1200.visible = true;
+            }
+            else if (params.firstConveyor == 'XConveyor D300 L1200') {
+                station.xcon_d300_l1200.visible = true;
+            }
+            else if (params.firstConveyor == 'XConveyor D400 L1200') {
+                station.xcon_d400_l1200.visible = true;
+            }
+            onGuiEncoderChanged(true);
+        }
+
+        function onGuiSecondConveyorChanged(value) {
+            station.xcon_d120_l1200.visible = false;
+            station.xcon_d200_l1200_1.visible = false;
+            if (params.secondConveyor == 'None') {
+
+            }
+            else if (params.secondConveyor == 'XConveyor D120 L1200') {
+                station.xcon_d120_l1200.visible = true;
+            }
+            else if (params.secondConveyor == 'XConveyor D200 L1200') {
+                station.xcon_d200_l1200_1.visible = true;
+            }
+        }
+
+        function onGuiEncoderChanged(value) {
+            station.encoder_d200.visible = false;
+            station.encoder_d300.visible = false;
+            station.encoder_d400.visible = false;
+            station.encoder_controler.visible = false;
+            if (params.encoderModule == true) {
+                station.encoder_controler.visible = true;
+                if (params.firstConveyor == 'None') {
+                    station.encoder_d200.visible = true;
+                }
+                else if (params.firstConveyor == 'XConveyor D200 L1200') {
+                    station.encoder_d200.visible = true;
+                }
+                else if (params.firstConveyor == 'XConveyor D300 L1200') {
+                    station.encoder_d300.visible = true;
+                }
+                else if (params.firstConveyor == 'XConveyor D400 L1200') {
+                    station.encoder_d400.visible = true;
+                }
+            }
+        }
+
+        function onGuiCameraChanged(value) {
+            station.camera_module.visible = params.cameraModule;
+        }
+
+        function onGuiEthernetHubChanged(value) {
+            station.ethernet_module.visible = params.ethernetHub;
+        }
+
+        function onGuiComputeChanged(value) {
+            station.mini_pc.visible = params.embeddedComputer;
+            station.monitor_pc.visible = params.embeddedComputer;
+        }
+
+        function intiDeltaStation() {
+            onGuiFrameChanged(1);
+            onGuiDeltaXModelChanged(1);
+            onGuiFirstConveyorChanged(1);
+            onGuiSecondConveyorChanged(1);
+            onGuiEncoderChanged(1);
+            onGuiCameraChanged(1);
+            onGuiEthernetHubChanged(1);
+            onGuiComputeChanged(1);
+
+            NonBlurStation();
+        }
+
+        function visibleStation() {
+            station.d800_frame.visible = false;
+            station.d600_frame.visible = false;
+            station.d400_frame.visible = false;
+
+            station.deltaxs_d400.visible = false;
+            station.deltaxs_d600.visible = false;
+            station.deltaxs_d800.visible = false;
+
+            station.xcon_d200_l1200.visible = false;
+            station.xcon_d300_l1200.visible = false;
+            station.xcon_d400_l1200.visible = false;
+
+            station.xcon_d120_l1200.visible = false;
+            station.xcon_d200_l1200_1.visible = false;
+
+            station.encoder_d200.visible = false;
+            station.encoder_d300.visible = false;
+            station.encoder_d400.visible = false;
+            station.encoder_controler.visible = false;
+
+            station.camera_module.visible = false;
+            station.ethernet_module.visible = false;
+            station.mini_pc.visible = false;
+            station.monitor_pc.visible = false;
+
+            station.conveyor_controler.visible = false;
+            station.estop_button.visible = false;
+            station.hmi_display.visible = false;
+            station.power_24v.visible = false;
+        }
+
+        function loadDeltaXStationComponentFormScene() {
+            station.d400_frame = scene.getObjectByName('Delta_X_S_V5_D400_Frame-1');
+            station.d600_frame = scene.getObjectByName('Delta_X_S_V5_D600_Frame-1');
+            station.d800_frame = scene.getObjectByName('Delta_X_S_V5_D800_Frame-1');
+            station.deltaxs_d400 = scene.getObjectByName('Delta_X_S_V5_D400-1');
+            station.deltaxs_d600 = scene.getObjectByName('Delta_X_S_V5_D600-1');
+            station.deltaxs_d800 = scene.getObjectByName('Delta_X_S_V5_D800-1');
+            station.xcon_d200_l1200 = scene.getObjectByName('XConveyor_D200_L1200-1');
+            station.xcon_d300_l1200 = scene.getObjectByName('XConveyor_D300_L1200-1');
+            station.xcon_d400_l1200 = scene.getObjectByName('XConveyor_D400_L1200-1');
+            station.xcon_d120_l1200 = scene.getObjectByName('XConveyor_D120_L1200-1');
+            station.xcon_d200_l1200_1 = scene.getObjectByName('XConveyor_D200_L1200_1-1');
+            station.encoder_d200 = scene.getObjectByName('XConveyor_D200_L1200_Encoder-1');
+            station.encoder_d300 = scene.getObjectByName('XConveyor_D300_L1200_Encoder-1');
+            station.encoder_d400 = scene.getObjectByName('XConveyor_D400_L1200_Encoder-2');
+            station.encoder_controler = scene.getObjectByName('XEncoder_Controler-1');
+            station.conveyor_controler = scene.getObjectByName('XConveyor_Controler-1');
+            station.camera_module = scene.getObjectByName('Module_Camera-2');
+            station.ethernet_module = scene.getObjectByName('Ethernet_Switch-2');
+            station.mini_pc = scene.getObjectByName('Mini_PC-1');
+            station.monitor_pc = scene.getObjectByName('15_In_Monitor-1');
+            station.estop_button = scene.getObjectByName('EStop_Button-1');
+            station.hmi_display = scene.getObjectByName('HMI_LCD-1');
+            station.power_24v = scene.getObjectByName('24V_Power-1');
+        }
+
+        function initScene() {
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+            camera.position.set(-200, 220, -130);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xbbbbbb);
+            //scene.fog = new THREE.Fog(0xeeeeee, 100, 1000);
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+            hemiLight.position.set(68, 170, 0);
+            scene.add(hemiLight);
+
+            const hemiLight1 = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.5);
+            hemiLight.position.set(68, -1000, -135);
+            //scene.add(hemiLight1);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+            dirLight.position.set(0, 400, 100);
+            dirLight.castShadow = false;
+            dirLight.shadow.camera.top = 180;
+            dirLight.shadow.camera.bottom = - 100;
+            dirLight.shadow.camera.left = - 120;
+            dirLight.shadow.camera.right = 120;
+            scene.add(dirLight);
+
+            //scene.add(new THREE.CameraHelper(dirLight.shadow.camera));
+
+            // ground
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false }));
+            mesh.rotation.x = - Math.PI / 2;
+            mesh.receiveShadow = true;
+            //scene.add(mesh);
+
+            const grid = new THREE.GridHelper(2000, 20, 0x000000, 0x000000);
+            grid.material.opacity = 0.2;
+            grid.material.transparent = true;
+            //scene.add(grid);
+        }
+
+        function initRenderer() {
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.aautoClear = true;
+
+            //document.body.appendChild(renderer.domElement);
+            document.getElementById("Scene3d").appendChild(renderer.domElement);
+
+            controlCamera = new OrbitControls(camera, renderer.domElement);
+            controlCamera.target.set(68, 170, -135);
+            controlCamera.update();
+        }
+
+        function addEventListener() {
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('dblclick', onPointerDown);
+        }
+
+        function loadFbx() {
+            // model
+            const loader = new FBXLoader();
+            loader.load('Delta X Station.fbx', function (object) {
+                object.scale.multiplyScalar(100);
+                object.name = "Station";
+
+                object.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.castShadow = false;
+                        child.receiveShadow = false;
+                    }
+                });
+                scene.add(object);
+                loadDeltaXStationComponentFormScene();
+
+                console.log(object);
+
+                blurStation();
+
+
+                intiDeltaStation();
+            });
+        }
+
+        function blurStation() {
+            blurObject(station.d400_frame, blurObjectOpacity);
+            blurObject(station.d600_frame, blurObjectOpacity);
+            blurObject(station.d800_frame, blurObjectOpacity);
+
+            blurObject(station.deltaxs_d400, blurObjectOpacity);
+            blurObject(station.deltaxs_d600, blurObjectOpacity);
+            blurObject(station.deltaxs_d800, blurObjectOpacity);
+
+            blurObject(station.xcon_d200_l1200, blurObjectOpacity);
+            blurObject(station.xcon_d300_l1200, blurObjectOpacity);
+            blurObject(station.xcon_d400_l1200, blurObjectOpacity);
+
+            blurObject(station.xcon_d120_l1200, blurObjectOpacity);
+            blurObject(station.xcon_d200_l1200_1, blurObjectOpacity);
+
+            blurObject(station.encoder_d200, blurObjectOpacity);
+            blurObject(station.encoder_d300, blurObjectOpacity);
+            blurObject(station.encoder_d400, blurObjectOpacity);
+
+            blurObject(station.encoder_controler, blurObjectOpacity);
+            blurObject(station.conveyor_controler, blurObjectOpacity);
+            blurObject(station.camera_module, blurObjectOpacity);
+            blurObject(station.ethernet_module, blurObjectOpacity);
+            blurObject(station.mini_pc, blurObjectOpacity);
+            blurObject(station.monitor_pc, blurObjectOpacity);
+
+            blurObject(station.estop_button, blurObjectOpacity);
+            blurObject(station.hmi_display, blurObjectOpacity);
+            blurObject(station.power_24v, blurObjectOpacity);
+        }
+
+        function NonBlurStation() {
+            blurObject(station.d400_frame, NonBlurObjectOpacity);
+            blurObject(station.d600_frame, NonBlurObjectOpacity);
+            blurObject(station.d800_frame, NonBlurObjectOpacity);
+
+            blurObject(station.deltaxs_d400, NonBlurObjectOpacity);
+            blurObject(station.deltaxs_d600, NonBlurObjectOpacity);
+            blurObject(station.deltaxs_d800, NonBlurObjectOpacity);
+
+            blurObject(station.xcon_d200_l1200, NonBlurObjectOpacity);
+            blurObject(station.xcon_d300_l1200, NonBlurObjectOpacity);
+            blurObject(station.xcon_d400_l1200, NonBlurObjectOpacity);
+
+            blurObject(station.xcon_d120_l1200, NonBlurObjectOpacity);
+            blurObject(station.xcon_d200_l1200_1, NonBlurObjectOpacity);
+
+            blurObject(station.encoder_d200, NonBlurObjectOpacity);
+            blurObject(station.encoder_d300, NonBlurObjectOpacity);
+            blurObject(station.encoder_d400, NonBlurObjectOpacity);
+
+            blurObject(station.encoder_controler, NonBlurObjectOpacity);
+            blurObject(station.conveyor_controler, NonBlurObjectOpacity);
+            blurObject(station.camera_module, NonBlurObjectOpacity);
+            blurObject(station.ethernet_module, NonBlurObjectOpacity);
+            blurObject(station.mini_pc, NonBlurObjectOpacity);
+            blurObject(station.monitor_pc, NonBlurObjectOpacity);
+
+            blurObject(station.estop_button, NonBlurObjectOpacity);
+            blurObject(station.hmi_display, NonBlurObjectOpacity);
+            blurObject(station.power_24v, NonBlurObjectOpacity);
+        }
+
+        function blurObject(object, opacity) {
+            object.traverse(function (child) {
+                if (child.isMesh) {
+                    if (opacity == 1) {
+                        child.material.transparent = false;
+                        child.material.opacity = opacity;
+                    }
+                    else {
+                        child.material.transparent = true;
+                        child.material.opacity = opacity;
+                    }
+                }
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onPointerDown(event) {
+            if (event.button != 0) {
+                return;
+            }
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children);
+
+            component_selected = '';
+
+            if (intersects.length > 0) {
+                component_selected = 'none';
+            }
+
+            for (var index = 0; index < intersects.length; index++) {
+                if (intersects[index].object.parent.isGroup) {
+                    const object = intersects[index].object.parent;
+                    if (object == station.d800_frame && station.d800_frame.visible == true) {
+                        component_selected = 'Frame';
+                        break;
+                    }
+                    else if (object == station.deltaxs_d800 && station.deltaxs_d800.visible == true) {
+                        component_selected = 'Robot';
+                        break;
+                    }
+                    else if (object == station.d600_frame && station.d600_frame.visible == true) {
+                        component_selected = 'Frame';
+                        break;
+                    }
+                    else if (object == station.deltaxs_d600 && station.deltaxs_d600.visible == true) {
+                        component_selected = 'Robot';
+                        break;
+                    }
+                    else if (object == station.d400_frame && station.d400_frame.visible == true) {
+                        component_selected = 'Frame';
+                        break;
+                    }
+                    else if (object == station.deltaxs_d400 && station.deltaxs_d400.visible == true) {
+                        component_selected = 'Robot';
+                        break;
+                    }
+                    else if (object == station.xcon_d200_l1200 && station.xcon_d200_l1200.visible == true) {
+                        component_selected = 'FConveyor';
+                        break;
+                    }
+                    else if (object == station.xcon_d300_l1200 && station.xcon_d300_l1200.visible == true) {
+                        component_selected = 'FConveyor';
+                        break;
+                    }
+                    else if (object == station.xcon_d400_l1200 && station.xcon_d400_l1200.visible == true) {
+                        component_selected = 'FConveyor';
+                        break;
+                    }
+                    else if (object == station.xcon_d120_l1200 && station.xcon_d120_l1200.visible == true) {
+                        component_selected = 'SConveyor';
+                        break;
+                    }
+                    else if (object == station.xcon_d200_l1200_1 && station.xcon_d200_l1200_1.visible == true) {
+                        component_selected = 'SConveyor';
+                        break;
+                    }
+                    else if (object == station.encoder_d200 && station.encoder_d200.visible == true) {
+                        component_selected = 'Encoder';
+                        break;
+                    }
+                    else if (object == station.encoder_d300 && station.encoder_d300.visible == true) {
+                        component_selected = 'Encoder';
+                        break;
+                    }
+                    else if (object == station.encoder_d400 && station.encoder_d400.visible == true) {
+                        component_selected = 'Encoder';
+                        break;
+                    }
+                    else if (object == station.camera_module && station.camera_module.visible == true) {
+                        component_selected = 'Camera';
+                        break;
+                    }
+                    else if (object == station.ethernet_module && station.ethernet_module.visible == true) {
+                        component_selected = 'Ethernet';
+                        break;
+                    }
+                    else if (object == station.mini_pc && station.mini_pc.visible == true) {
+                        component_selected = 'Mini_PC';
+                        break;
+                    }
+                    else if (object == station.monitor_pc && station.monitor_pc.visible == true) {
+                        component_selected = 'Monitor_PC';
+                        break;
+                    }
+                }
+            }
+
+            hightlightComponent(component_selected);
+
+            console.log(component_selected);
+        }
+
+        function hightlightComponent(component_name) {
+            if (component_name === '' || component_name === 'none') {
+                NonBlurStation();
+                return;
+            }
+
+            blurStation();
+            if (component_name === 'Frame') {
+                blurObject(station.d400_frame, NonBlurObjectOpacity);
+                blurObject(station.d600_frame, NonBlurObjectOpacity);
+                blurObject(station.d800_frame, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Robot') {
+                blurObject(station.deltaxs_d400, NonBlurObjectOpacity);
+                blurObject(station.deltaxs_d600, NonBlurObjectOpacity);
+                blurObject(station.deltaxs_d800, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'FConveyor') {
+                blurObject(station.xcon_d200_l1200, NonBlurObjectOpacity);
+                blurObject(station.xcon_d300_l1200, NonBlurObjectOpacity);
+                blurObject(station.xcon_d400_l1200, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'SConveyor') {
+                blurObject(station.xcon_d120_l1200, NonBlurObjectOpacity);
+                blurObject(station.xcon_d200_l1200_1, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Encoder') {
+                blurObject(station.encoder_d200, NonBlurObjectOpacity);
+                blurObject(station.encoder_d300, NonBlurObjectOpacity);
+                blurObject(station.encoder_d400, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Camera') {
+                blurObject(station.camera_module, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Ethernet') {
+                blurObject(station.ethernet_module, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Mini_PC') {
+                blurObject(station.mini_pc, NonBlurObjectOpacity);
+            }
+            else if (component_name === 'Monitor_PC') {
+                blurObject(station.monitor_pc, NonBlurObjectOpacity);
+            }
+        }
+
+        function animate() {
+            renderer.render(scene, camera);
+            //stats.update();
+            requestAnimationFrame(animate);
+        }
+
+        function generateTable() {
+
+        }
+
+
+    </script>
+
+</body>
+
+</html>
